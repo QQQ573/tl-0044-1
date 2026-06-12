@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
@@ -10,10 +11,15 @@ import { TransfersModule } from './transfers/transfers.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { LogisticsModule } from './logistics/logistics.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuditModule } from './audit/audit.module';
+import { MessagesModule } from './messages/messages.module';
+import { MinioModule } from './common/minio/minio.module';
+import { RedisModule } from './common/redis/redis.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    EventEmitterModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -31,6 +37,8 @@ import { NotificationsModule } from './notifications/notifications.module';
       }),
     }),
     ScheduleModule.forRoot(),
+    MinioModule,
+    RedisModule,
     AuthModule,
     UsersModule,
     WarehousesModule,
@@ -39,6 +47,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     AttachmentsModule,
     LogisticsModule,
     NotificationsModule,
+    AuditModule,
+    MessagesModule,
   ],
 })
 export class AppModule {}

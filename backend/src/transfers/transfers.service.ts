@@ -26,6 +26,11 @@ import {
   OptimisticLockException,
 } from '../common/exceptions/business.exceptions';
 import { User } from '../users/entities/user.entity';
+import { AuditService } from '../audit/audit.service';
+import { MessagesService } from '../messages/messages.service';
+import { MessageType } from '../messages/entities/message.entity';
+import { UsersService } from '../users/users.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 
 const ACTIVE_STATUSES = [
   TransferStatus.DRAFT,
@@ -44,6 +49,10 @@ export class TransfersService {
     @Inject('REDIS_CLIENT')
     private readonly redis: Redis,
     private dataSource: DataSource,
+    private auditService: AuditService,
+    private messagesService: MessagesService,
+    private usersService: UsersService,
+    private warehousesService: WarehousesService,
   ) {}
 
   private generateTransferNo(): string {
@@ -72,6 +81,123 @@ export class TransfersService {
 
   private canTransition(from: TransferStatus, to: TransferStatus): boolean {
     return TRANSFER_STATUS_FLOW[from]?.includes(to) ?? false;
+  }
+
+  private async afterStatusTransition(
+    transfer: Transfer,
+    oldStatus: TransferStatus,
+    newStatus: TransferStatus,
+    operator: User,
+    remark?: string,
+  ): Promise<void> {
+    try {
+      await this.auditService.logStatusChange(
+        transfer.id,
+        transfer.transferNo,
+        oldStatus,
+        newStatus,
+        operator.id,
+        operator.realName,
+        operator.role,
+        remark,
+      );
+
+      await this.sendNotificationForStatusChange(transfer, oldStatus, newStatus, operator);
+    } catch (error) {
+      console.error('Failed to log status change or send notification:', error);
+    }
+  }
+
+  private async sendNotificationForStatusChange(
+    transfer: Transfer,
+    oldStatus: TransferStatus,
+    newStatus: TransferStatus,
+    operator: User,
+  ): Promise<void> {
+    const transferWithRelations = await this.transfersRepository.findOne({
+      where: { id: transfer.id },
+      relations: ['sourceWarehouse', 'targetWarehouse', 'applicant'],
+    });
+
+    if (!transferWithRelations) return;
+
+    const metaData = {
+      transferId: transfer.id,
+      transferNo: transfer.transferNo,
+      oldStatus,
+      newStatus,
+      operatorId: operator.id,
+      operatorName: operator.realName,
+    };
+
+    const transition = `${oldStatus}->${newStatus}`;
+
+    switch (transition) {
+      case 'draft->pending_approval':
+      case 'create->pending_approval':
+        await this.messagesService.sendTransferNotification(
+          MessageType.TRANSFER_SUBMITTED,
+          [UserRole.FINANCE, UserRole.REGION_MANAGER],
+          `调拨申请待审核: ${transfer.transferNo}`,
+          `${operator.realName} 提交了调拨申请 ${transfer.transferNo}，请及时审核。\n调出仓库: ${transferWithRelations.sourceWarehouse?.name}\n调入仓库: ${transferWithRelations.targetWarehouse?.name}\n数量: ${transfer.quantity}`,
+          metaData,
+          transfer.id,
+          transfer.transferNo,
+        );
+        break;
+
+      case 'pending_approval->pending_shipment':
+        if (transferWithRelations.applicantId) {
+          await this.messagesService.sendTransferNotificationToUser(
+            MessageType.TRANSFER_APPROVED,
+            transferWithRelations.applicantId,
+            `调拨申请已通过: ${transfer.transferNo}`,
+            `您的调拨申请 ${transfer.transferNo} 已被 ${operator.realName} 审核通过，等待出库。`,
+            metaData,
+            transfer.id,
+            transfer.transferNo,
+          );
+        }
+        break;
+
+      case 'pending_approval->rejected':
+        if (transferWithRelations.applicantId) {
+          await this.messagesService.sendTransferNotificationToUser(
+            MessageType.TRANSFER_REJECTED,
+            transferWithRelations.applicantId,
+            `调拨申请已驳回: ${transfer.transferNo}`,
+            `您的调拨申请 ${transfer.transferNo} 已被 ${operator.realName} 驳回。\n驳回原因: ${transfer.rejectionReason || '未填写'}`,
+            metaData,
+            transfer.id,
+            transfer.transferNo,
+          );
+        }
+        break;
+
+      case 'pending_shipment->in_transit':
+        await this.messagesService.sendTransferNotification(
+          MessageType.TRANSFER_SHIPPED,
+          [UserRole.WAREHOUSE_KEEPER],
+          `调拨已出库: ${transfer.transferNo}`,
+          `调拨申请 ${transfer.transferNo} 已出库。\n物流: ${transfer.logisticsCompany}\n运单号: ${transfer.trackingNo}\n请 ${transferWithRelations.targetWarehouse?.name} 仓管注意查收。`,
+          metaData,
+          transfer.id,
+          transfer.transferNo,
+        );
+        break;
+
+      case 'in_transit->completed':
+        await this.messagesService.sendTransferNotification(
+          MessageType.TRANSFER_RECEIVED,
+          [UserRole.WAREHOUSE_KEEPER, UserRole.REGION_MANAGER],
+          `调拨已入库: ${transfer.transferNo}`,
+          `调拨申请 ${transfer.transferNo} 已确认入库。\n${transferWithRelations.targetWarehouse?.name} 已签收。`,
+          metaData,
+          transfer.id,
+          transfer.transferNo,
+        );
+        break;
+    }
   }
 
   private async checkDuplicate(
@@ -137,10 +263,22 @@ export class TransfersService {
 
       await queryRunner.commitTransaction();
 
-      return this.transfersRepository.findOne({
+      const result = await this.transfersRepository.findOne({
         where: { id: savedTransfer.id },
         relations: ['sourceWarehouse', 'targetWarehouse', 'applicant'],
       });
+
+      if (result && createTransferDto.submitForApproval) {
+        await this.afterStatusTransition(
+          result,
+          TransferStatus.DRAFT,
+          TransferStatus.PENDING_APPROVAL,
+          user,
+          '创建时直接提交审核',
+        );
+      }
+
+      return result;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -219,6 +357,7 @@ export class TransfersService {
 
   async submitForApproval(id: string, user: User): Promise<Transfer> {
     const transfer = await this.findOne(id);
+    const oldStatus = transfer.status;
 
     if (transfer.status !== TransferStatus.DRAFT) {
       throw new BadRequestException('只有草稿状态的申请可以提交审核');
@@ -229,7 +368,11 @@ export class TransfersService {
     }
 
     transfer.status = TransferStatus.PENDING_APPROVAL;
-    return this.transfersRepository.save(transfer);
+    const result = await this.transfersRepository.save(transfer);
+
+    await this.afterStatusTransition(result, oldStatus, TransferStatus.PENDING_APPROVAL, user);
+
+    return result;
   }
 
   async approve(
@@ -252,6 +395,8 @@ export class TransfersService {
       if (!transfer) {
         throw new TransferNotFoundException(id);
       }
+
+      const oldStatus = transfer.status;
 
       if (transfer.status !== TransferStatus.PENDING_APPROVAL) {
         throw new BadRequestException('只有待审核状态的申请可以审批');
@@ -281,13 +426,25 @@ export class TransfersService {
         transfer.rejectionReason = approveDto.rejectionReason;
       }
 
-      const result = await queryRunner.manager.save(transfer);
+      const saved = await queryRunner.manager.save(transfer);
       await queryRunner.commitTransaction();
 
-      return this.transfersRepository.findOne({
-        where: { id: result.id },
+      const result = await this.transfersRepository.findOne({
+        where: { id: saved.id },
         relations: ['sourceWarehouse', 'targetWarehouse', 'applicant', 'approver'],
       });
+
+      if (result) {
+        await this.afterStatusTransition(
+          result,
+          oldStatus,
+          approveDto.decision,
+          user,
+          approveDto.rejectionReason,
+        );
+      }
+
+      return result!;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -298,6 +455,7 @@ export class TransfersService {
 
   async ship(id: string, shipDto: ShipTransferDto, user: User): Promise<Transfer> {
     const transfer = await this.findOne(id);
+    const oldStatus = transfer.status;
 
     if (transfer.status !== TransferStatus.PENDING_SHIPMENT) {
       throw new BadRequestException('只有待出库状态的申请可以发货');
@@ -312,11 +470,16 @@ export class TransfersService {
     transfer.logisticsCompany = shipDto.logisticsCompany;
     transfer.trackingNo = shipDto.trackingNo;
 
-    return this.transfersRepository.save(transfer);
+    const result = await this.transfersRepository.save(transfer);
+
+    await this.afterStatusTransition(result, oldStatus, TransferStatus.IN_TRANSIT, user);
+
+    return result;
   }
 
   async receive(id: string, user: User): Promise<Transfer> {
     const transfer = await this.findOne(id);
+    const oldStatus = transfer.status;
 
     if (transfer.status !== TransferStatus.IN_TRANSIT) {
       throw new BadRequestException('只有在途状态的申请可以确认入库');
@@ -329,7 +492,11 @@ export class TransfersService {
     transfer.status = TransferStatus.COMPLETED;
     transfer.receivedAt = new Date();
 
-    return this.transfersRepository.save(transfer);
+    const result = await this.transfersRepository.save(transfer);
+
+    await this.afterStatusTransition(result, oldStatus, TransferStatus.COMPLETED, user);
+
+    return result;
   }
 
   async remove(id: string, user: User): Promise<void> {

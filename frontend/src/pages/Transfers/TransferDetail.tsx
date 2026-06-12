@@ -18,6 +18,7 @@ import {
   List,
   Empty,
   Popconfirm,
+  Typography,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -55,7 +56,10 @@ import {
   Attachment,
   LogisticsTracking,
   UserRole,
+  AuditLog,
+  AuditActionLabel,
 } from '@/types';
+import { getAuditLogs } from '@/api/messages';
 import { useUserStore } from '@/store/userStore';
 import dayjs from 'dayjs';
 
@@ -70,6 +74,7 @@ const TransferDetail: React.FC = () => {
   const [detail, setDetail] = useState<Transfer | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [trackings, setTrackings] = useState<LogisticsTracking[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   const [approveModalOpen, setApproveModalOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
@@ -110,11 +115,22 @@ const TransferDetail: React.FC = () => {
     }
   };
 
+  const fetchAuditLogs = async () => {
+    if (!id) return;
+    try {
+      const { data } = await getAuditLogs(id);
+      setAuditLogs(data);
+    } catch (error) {
+      // handled
+    }
+  };
+
   useEffect(() => {
     if (id) {
       fetchDetail();
       fetchAttachments();
       fetchTrackings();
+      fetchAuditLogs();
     }
   }, [id]);
 
@@ -488,6 +504,69 @@ const TransferDetail: React.FC = () => {
                     </div>
                   ),
                 }))}
+              />
+            )}
+          </Card>
+
+          <Card title="操作日志" style={{ marginTop: 16 }}>
+            {auditLogs.length === 0 ? (
+              <Empty description="暂无操作日志" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                dataSource={auditLogs}
+                renderItem={(log) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: '50%',
+                            background: '#e6f7ff',
+                            color: '#1890ff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 500,
+                            fontSize: 12,
+                          }}
+                        >
+                          {log.userName?.charAt(0) || '系'}
+                        </div>
+                      }
+                      title={
+                        <Space>
+                          <Typography.Text strong>{AuditActionLabel[log.action]}</Typography.Text>
+                          {log.oldStatus && log.newStatus && (
+                            <Tag color="blue">
+                              {TransferStatusLabel[log.oldStatus as TransferStatus]} → {TransferStatusLabel[log.newStatus as TransferStatus]}
+                            </Tag>
+                          )}
+                        </Space>
+                      }
+                      description={
+                        <div>
+                          {log.remark && (
+                            <Typography.Paragraph style={{ marginBottom: 4, color: '#666' }}>
+                              {log.remark}
+                            </Typography.Paragraph>
+                          )}
+                          <Space size="large" style={{ fontSize: 12, color: '#999' }}>
+                            <span>
+                              操作人：{log.userName || '系统'}
+                              {log.userRole && ` (${log.userRole === UserRole.WAREHOUSE_KEEPER ? '仓管' : log.userRole === UserRole.FINANCE ? '财务' : '区域经理'})`}
+                            </span>
+                            <span>
+                              <ClockCircleOutlined style={{ marginRight: 4 }} />
+                              {dayjs(log.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                            </span>
+                          </Space>
+                        </div>
+                      }
+                    />
+                  </List.Item>
+                )}
               />
             )}
           </Card>

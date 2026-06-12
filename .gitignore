@@ -48,3 +48,8 @@ temp/
 
 # Docker local overrides
 docker-compose.override.yml
+
+# SSH / accidental local files
+known_hosts
+*.sshknown_hosts
+.ssh/

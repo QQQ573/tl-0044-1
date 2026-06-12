@@ -39,6 +39,108 @@ export const TransferStatusColor: Record<TransferStatus, string> = {
   [TransferStatus.REJECTED]: 'error',
 };
 
+export enum AuditAction {
+  CREATE = 'create',
+  UPDATE = 'update',
+  SUBMIT = 'submit',
+  APPROVE = 'approve',
+  REJECT = 'reject',
+  SHIP = 'ship',
+  RECEIVE = 'receive',
+  DELETE = 'delete',
+  LOGISTICS_UPDATE = 'logistics_update',
+  ATTACHMENT_UPLOAD = 'attachment_upload',
+  ATTACHMENT_DELETE = 'attachment_delete',
+}
+
+export const AuditActionLabel: Record<AuditAction, string> = {
+  [AuditAction.CREATE]: '创建',
+  [AuditAction.UPDATE]: '编辑',
+  [AuditAction.SUBMIT]: '提交审核',
+  [AuditAction.APPROVE]: '审核通过',
+  [AuditAction.REJECT]: '审核驳回',
+  [AuditAction.SHIP]: '确认出库',
+  [AuditAction.RECEIVE]: '确认入库',
+  [AuditAction.DELETE]: '删除',
+  [AuditAction.LOGISTICS_UPDATE]: '物流更新',
+  [AuditAction.ATTACHMENT_UPLOAD]: '上传附件',
+  [AuditAction.ATTACHMENT_DELETE]: '删除附件',
+};
+
+export interface AuditLog {
+  id: string;
+  action: AuditAction;
+  transferId?: string;
+  transferNo?: string;
+  oldStatus?: string;
+  newStatus?: string;
+  userId?: string;
+  userName?: string;
+  userRole?: string;
+  remark?: string;
+  metaData?: Record<string, any>;
+  ipAddress?: string;
+  createdAt: string;
+}
+
+export enum MessageType {
+  TRANSFER_SUBMITTED = 'transfer_submitted',
+  TRANSFER_APPROVED = 'transfer_approved',
+  TRANSFER_REJECTED = 'transfer_rejected',
+  TRANSFER_SHIPPED = 'transfer_shipped',
+  TRANSFER_RECEIVED = 'transfer_received',
+  LOGISTICS_TIMEOUT = 'logistics_timeout',
+  SYSTEM = 'system',
+}
+
+export const MessageTypeLabel: Record<MessageType, string> = {
+  [MessageType.TRANSFER_SUBMITTED]: '调拨提交',
+  [MessageType.TRANSFER_APPROVED]: '审核通过',
+  [MessageType.TRANSFER_REJECTED]: '审核驳回',
+  [MessageType.TRANSFER_SHIPPED]: '已出库',
+  [MessageType.TRANSFER_RECEIVED]: '已入库',
+  [MessageType.LOGISTICS_TIMEOUT]: '物流超时',
+  [MessageType.SYSTEM]: '系统通知',
+};
+
+export const MessageTypeIcon: Record<MessageType, string> = {
+  [MessageType.TRANSFER_SUBMITTED]: '📝',
+  [MessageType.TRANSFER_APPROVED]: '✅',
+  [MessageType.TRANSFER_REJECTED]: '❌',
+  [MessageType.TRANSFER_SHIPPED]: '🚚',
+  [MessageType.TRANSFER_RECEIVED]: '📦',
+  [MessageType.LOGISTICS_TIMEOUT]: '⚠️',
+  [MessageType.SYSTEM]: '🔔',
+};
+
+export enum MessageChannel {
+  IN_APP = 'in_app',
+  PUSH = 'push',
+  EMAIL = 'email',
+}
+
+export interface Message {
+  id: string;
+  type: MessageType;
+  recipientId: string;
+  title: string;
+  content: string;
+  metaData?: Record<string, any>;
+  read: boolean;
+  readAt?: string;
+  channel: MessageChannel;
+  transferId?: string;
+  transferNo?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageListResponse {
+  data: Message[];
+  total: number;
+  unreadCount: number;
+}
+
 export interface Warehouse {
   id: string;
   code: string;
@@ -115,3 +217,12 @@ export interface LogisticsTracking {
   description?: string;
   operator?: string;
 }
+
+export interface SseMessage {
+  type: 'heartbeat' | 'message';
+  data: {
+    timestamp?: number;
+    message?: Message;
+  };
+}
+

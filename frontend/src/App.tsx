@@ -5,6 +5,7 @@ import LoginPage from '@/pages/Login/Login';
 import TransferList from '@/pages/Transfers/TransferList';
 import TransferForm from '@/pages/Transfers/TransferForm';
 import TransferDetail from '@/pages/Transfers/TransferDetail';
+import NotificationCenter from '@/pages/Notifications/NotificationCenter';
 import { UserRole } from '@/types';
 
 const App: React.FC = () => {
@@ -24,6 +25,7 @@ const App: React.FC = () => {
         <Route path="/transfers/create" element={<TransferForm />} />
         <Route path="/transfers/:id" element={<TransferDetail />} />
         <Route path="/transfers/:id/edit" element={<TransferForm />} />
+        <Route path="/notifications" element={<NotificationCenter />} />
       </Route>
 
       <Route path="/403" element={<div style={{ padding: 50, textAlign: 'center' }}>403 - 无权限访问</div>} />
