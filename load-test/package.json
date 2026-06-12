@@ -1,0 +1,15 @@
+{
+  "name": "wms-load-test",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:create": "node scripts/create-transfer.js",
+    "test:approve": "node scripts/approve-transfer.js",
+    "test:query": "node scripts/query-transfer.js",
+    "test:all": "node scripts/run-all.js"
+  },
+  "dependencies": {
+    "autocannon": "^7.12.0",
+    "axios": "^1.6.2"
+  }
+}
